@@ -21,19 +21,19 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Servicio centralizado para toda comunicación con la API de Riot Games.
+ * Centralized service for all communication with the Riot Games API.
  *
- * ┌─────────────────────────────────────────────────────────────────┐
- * │  FLUJO COMPLETO para obtener el rango de un jugador:            │
- * │                                                                 │
- * │  1. Account-V1  (cluster)   Riot ID ──→ PUUID                  │
- * │  2. Summoner-V4 (platform)  PUUID  ──→ summonerId + nivel       │
- * │  3. League-V4   (platform)  summonerId ──→ entradas de rango    │
- * └─────────────────────────────────────────────────────────────────┘
+ * Full flow to retrieve a player's rank:
+ *  1. Account-V1  (cluster)   Riot ID   -> PUUID
+ *  2. Summoner-V4 (platform)  PUUID     -> summoner level + icon
+ *  3. League-V4   (platform)  PUUID     -> ranked entries
  *
- * Todos los métodos son SÍNCRONOS (bloqueantes). La asincronía se
- * gestiona desde {@link com.lolbot.commands.CommandManager} usando
- * un ExecutorService para no bloquear el hilo de eventos de JDA.
+ * Full flow to retrieve match history:
+ *  4. Match-V5    (cluster)   PUUID     -> list of match IDs
+ *  5. Match-V5    (cluster)   match ID  -> match details
+ *
+ * All methods are synchronous. Async execution is handled by CommandManager
+ * via a virtual-thread ExecutorService so JDA's event thread is never blocked.
  */
 public class RiotApiService {
 
@@ -57,32 +57,26 @@ public class RiotApiService {
     }
 
     // =========================================================================
-    // PASO 1 — Account-V1: Riot ID → PUUID
+    // Step 1 — Account-V1: Riot ID -> PUUID
     // =========================================================================
 
     /**
-     * Consulta Account-V1 para obtener el PUUID a partir del Riot ID.
+     * Queries Account-V1 to obtain the PUUID from a Riot ID.
      *
-     * El PUUID (Player Universally Unique Identifier) identifica al jugador
-     * de forma global, independientemente de su región o servidor.
+     * The PUUID (Player Universally Unique Identifier) identifies the player
+     * globally, regardless of region or server.
      *
-     * Host de la petición: {cluster}.api.riotgames.com
-     *  - americas  → NA, BR, LA1, LA2
-     *  - europe    → EUW, EUNE, TR, RU
-     *  - asia      → KR, JP
-     *  - sea       → OCE y servidores del Sudeste Asiático
-     *
-     * @param gameName  Parte del nombre en el Riot ID, ej: "Faker"
-     * @param tagLine   Parte del tag en el Riot ID,   ej: "KR1"
-     * @param platform  Plataforma del jugador,        ej: "kr"
-     * @throws RiotApiException si el jugador no existe (404) o hay error de API
+     * Request host: {cluster}.api.riotgames.com
+     *  - americas -> NA, BR, LAN, LAS
+     *  - europe   -> EUW, EUNE, TR, RU
+     *  - asia     -> KR, JP
+     *  - sea      -> OCE and Southeast Asia servers
      */
     public AccountDto getAccountByRiotId(String gameName, String tagLine, String platform)
             throws RiotApiException, IOException {
 
         String cluster = RegionUtil.getCluster(platform);
 
-        // URL-encodificamos gameName y tagLine para manejar espacios y caracteres especiales
         String encodedName = URLEncoder.encode(gameName, StandardCharsets.UTF_8);
         String encodedTag  = URLEncoder.encode(tagLine,  StandardCharsets.UTF_8);
 
@@ -91,25 +85,19 @@ public class RiotApiService {
             cluster, encodedName, encodedTag
         );
 
-        logger.info("Account-V1 → {}#{} [cluster: {}]", gameName, tagLine, cluster);
+        logger.info("Account-V1 -> {}#{} [cluster: {}]", gameName, tagLine, cluster);
         return executeRequest(url, AccountDto.class);
     }
 
     // =========================================================================
-    // PASO 2 — Summoner-V4: PUUID → datos del invocador
+    // Step 2 — Summoner-V4: PUUID -> summoner data
     // =========================================================================
 
     /**
-     * Consulta Summoner-V4 para obtener los datos del invocador a partir del PUUID.
+     * Queries Summoner-V4 to retrieve summoner level and profile icon.
      *
-     * El campo clave de la respuesta es "id" (summonerId cifrado), que se
-     * necesita para la siguiente consulta a League-V4.
-     *
-     * Host de la petición: {platform}.api.riotgames.com
+     * Request host: {platform}.api.riotgames.com
      *  - na1, euw1, kr, jp1, br1, la1, la2, tr1, ru, eun1, oc1
-     *
-     * @param puuid    PUUID global del jugador (obtenido en el paso anterior)
-     * @param platform Plataforma del servidor, ej: "na1", "euw1", "kr"
      */
     public SummonerDto getSummonerByPuuid(String puuid, String platform)
             throws RiotApiException, IOException {
@@ -119,26 +107,22 @@ public class RiotApiService {
             platform, puuid
         );
 
-        logger.info("Summoner-V4 → PUUID: {}... [platform: {}]", puuid.substring(0, 8), platform);
+        logger.info("Summoner-V4 -> PUUID: {}... [platform: {}]", puuid.substring(0, 8), platform);
         return executeRequest(url, SummonerDto.class);
     }
 
     // =========================================================================
-    // PASO 3 — League-V4: summonerId → entradas de clasificación
+    // Step 3 — League-V4: PUUID -> ranked entries
     // =========================================================================
 
     /**
-     * Consulta League-V4 para obtener todas las entradas de clasificación del jugador.
+     * Queries League-V4 to retrieve all ranked entries for a player.
      *
-     * La API devuelve un ARRAY donde cada elemento es una cola diferente:
-     *  - "RANKED_SOLO_5x5"  →  Solo / Duo
-     *  - "RANKED_FLEX_SR"   →  Flex 5v5
+     * The API returns an array where each element is a different queue:
+     *  - "RANKED_SOLO_5x5" -> Solo/Duo
+     *  - "RANKED_FLEX_SR"  -> Flex 5v5
      *
-     * Si el jugador nunca jugó clasificatoria, el array estará vacío.
-     * Si el jugador solo jugó una cola, habrá solo un elemento.
-     *
-     * @param summonerId ID cifrado del invocador (campo "id" del SummonerDto)
-     * @param platform   Plataforma del servidor, ej: "na1"
+     * Returns an empty list if the player has never played ranked.
      */
     public List<LeagueEntryDto> getLeagueEntries(String puuid, String platform)
             throws RiotApiException, IOException {
@@ -148,16 +132,13 @@ public class RiotApiService {
             platform, puuid
         );
 
-        logger.info("League-V4 → PUUID: {}... [platform: {}]", puuid.substring(0, 8), platform);
-
-        // La respuesta de este endpoint es un array JSON, no un objeto.
-        // Por eso deserializamos a LeagueEntryDto[] y luego lo convertimos a List.
+        logger.info("League-V4 -> PUUID: {}... [platform: {}]", puuid.substring(0, 8), platform);
         LeagueEntryDto[] entries = executeRequest(url, LeagueEntryDto[].class);
         return Arrays.asList(entries);
     }
 
     // =========================================================================
-    // PASO 4 — Match-V5: PUUID → IDs de partidas recientes
+    // Step 4 — Match-V5: PUUID -> recent match IDs
     // =========================================================================
 
     public List<String> getMatchIds(String puuid, String platform, int count)
@@ -169,14 +150,14 @@ public class RiotApiService {
             cluster, puuid, count
         );
 
-        logger.info("Match-V5 IDs → PUUID: {}... [cluster: {}, count: {}]",
+        logger.info("Match-V5 IDs -> PUUID: {}... [cluster: {}, count: {}]",
                 puuid.substring(0, 8), cluster, count);
         String[] ids = executeRequest(url, String[].class);
         return Arrays.asList(ids);
     }
 
     // =========================================================================
-    // PASO 5 — Match-V5: matchId → datos completos de la partida
+    // Step 5 — Match-V5: matchId -> full match data
     // =========================================================================
 
     public MatchDto getMatch(String matchId, String platform)
@@ -188,58 +169,56 @@ public class RiotApiService {
             cluster, matchId
         );
 
-        logger.info("Match-V5 → {} [cluster: {}]", matchId, cluster);
+        logger.info("Match-V5 -> {} [cluster: {}]", matchId, cluster);
         return executeRequest(url, MatchDto.class);
     }
 
     // =========================================================================
-    // Método central — ejecuta la petición HTTP y maneja los códigos de estado
+    // Core HTTP method
     // =========================================================================
 
     /**
-     * Ejecuta una petición GET autenticada a la API de Riot y deserializa la respuesta.
+     * Executes an authenticated GET request to the Riot API and deserializes the response.
      *
-     * @param url          URL completa del endpoint a consultar
-     * @param responseType Clase Java a la que mapear el JSON de respuesta
-     * @throws RiotApiException con el código HTTP y mensaje descriptivo en caso de error
-     * @throws IOException      en caso de error de red o timeout
+     * @param url          Full endpoint URL
+     * @param responseType Java class to map the JSON response to
+     * @throws RiotApiException with the HTTP code and a descriptive message on API errors
+     * @throws IOException      on network errors or timeouts
      */
     private <T> T executeRequest(String url, Class<T> responseType)
             throws RiotApiException, IOException {
 
         Request request = new Request.Builder()
                 .url(url)
-                // El API Key de Riot va siempre en el header X-Riot-Token
                 .addHeader("X-Riot-Token", apiKey)
                 .addHeader("Accept",       "application/json")
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
 
-            // Códigos de error comunes de la API de Riot y sus causas:
             switch (response.code()) {
-                case 200 -> { /* Todo correcto, continuamos */ }
+                case 200 -> { /* success */ }
                 case 400 -> throw new RiotApiException(
-                    "Solicitud inválida (400). Verifica el formato del Riot ID.", 400);
+                    "Invalid request (400). Check the Riot ID format.", 400);
                 case 401 -> throw new RiotApiException(
-                    "API Key inválida o expirada (401). Genera una nueva en developer.riotgames.com.", 401);
+                    "Invalid or expired API key (401). Generate a new one at developer.riotgames.com.", 401);
                 case 403 -> throw new RiotApiException(
-                    "Sin permisos para este endpoint (403). Tu API Key podría ser de tipo Development.", 403);
+                    "No permissions for this endpoint (403). Your key may be a Development type.", 403);
                 case 404 -> throw new RiotApiException(
-                    "Jugador no encontrado (404). Verifica el Riot ID y la región.", 404);
+                    "Player not found (404). Check the Riot ID and region.", 404);
                 case 429 -> throw new RiotApiException(
-                    "Límite de peticiones alcanzado (429). Espera unos segundos e inténtalo de nuevo.", 429);
+                    "Rate limit exceeded (429). Please wait a few seconds and try again.", 429);
                 case 500 -> throw new RiotApiException(
-                    "Error interno en los servidores de Riot (500). Intenta más tarde.", 500);
+                    "Riot internal server error (500). Please try again later.", 500);
                 case 503 -> throw new RiotApiException(
-                    "Servicio de Riot no disponible (503). Intenta más tarde.", 503);
+                    "Riot service unavailable (503). Please try again later.", 503);
                 default  -> throw new RiotApiException(
-                    "Error inesperado de la API (" + response.code() + ").", response.code());
+                    "Unexpected API error (" + response.code() + ").", response.code());
             }
 
             ResponseBody body = response.body();
             if (body == null) {
-                throw new RiotApiException("La respuesta de la API estaba vacía.", 0);
+                throw new RiotApiException("API response was empty.", 0);
             }
 
             return objectMapper.readValue(body.string(), responseType);
@@ -247,13 +226,13 @@ public class RiotApiService {
     }
 
     // =========================================================================
-    // Excepción interna
+    // Internal exception
     // =========================================================================
 
     /**
-     * Excepción lanzada cuando la API de Riot devuelve un código de error HTTP.
-     * El código HTTP se expone para que el llamador pueda distinguir entre
-     * un jugador no encontrado (404) y un error de autenticación (401/403).
+     * Thrown when the Riot API returns an HTTP error code.
+     * The HTTP code is exposed so callers can distinguish between
+     * a missing player (404) and an auth failure (401/403).
      */
     public static class RiotApiException extends Exception {
 

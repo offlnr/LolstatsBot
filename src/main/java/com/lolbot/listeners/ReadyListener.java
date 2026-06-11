@@ -6,8 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Listener que reacciona al evento de conexión exitosa del bot con Discord.
- * JDA llama a onReady() una vez que la sesión Gateway está completamente establecida.
+ * Fires when the bot successfully establishes a Gateway session with Discord.
+ * JDA calls onReady() exactly once after the session is fully initialized.
  */
 public class ReadyListener extends ListenerAdapter {
 
@@ -15,12 +15,12 @@ public class ReadyListener extends ListenerAdapter {
 
     @Override
     public void onReady(ReadyEvent event) {
-        String botName   = event.getJDA().getSelfUser().getName();
+        String botName    = event.getJDA().getSelfUser().getName();
         int    guildCount = event.getGuildTotalCount();
 
         logger.info("================================================");
-        logger.info("  Bot listo: {}", botName);
-        logger.info("  Servidores conectados: {}", guildCount);
+        logger.info("  Bot ready: {}", botName);
+        logger.info("  Connected servers: {}", guildCount);
         logger.info("================================================");
     }
 }

@@ -4,18 +4,18 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * Respuesta del endpoint Summoner-V4 de Riot Games.
+ * Response from the Summoner-V4 endpoint.
  *
  * Endpoint: GET /lol/summoner/v4/summoners/by-puuid/{encryptedPUUID}
- * Host:     {region}.api.riotgames.com  (ej: na1.api.riotgames.com)
+ * Host:     {platform}.api.riotgames.com  (e.g. na1.api.riotgames.com)
  *
- * El campo más importante aquí es "id" (summonerId cifrado),
- * que necesitamos para consultar la clasificación en League-V4.
+ * Used to retrieve summoner level and profile icon for display purposes.
+ * Note: the "id" field (encrypted summoner ID) may be null for accounts
+ * migrated to the new Riot ID system — use PUUID-based endpoints instead.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SummonerDto {
 
-    /** ID cifrado del invocador — requerido para consultar League-V4 */
     @JsonProperty("id")
     private String summonerId;
 
@@ -25,7 +25,7 @@ public class SummonerDto {
     @JsonProperty("puuid")
     private String puuid;
 
-    /** Nombre legacy del invocador (puede estar vacío en cuentas nuevas post-Riot ID) */
+    /** Legacy summoner name — may be empty for post-Riot ID accounts. */
     @JsonProperty("name")
     private String name;
 

@@ -8,11 +8,11 @@ import java.io.InputStream;
 import java.util.Properties;
 
 /**
- * Carga y provee acceso a la configuración del bot.
+ * Loads and exposes bot configuration.
  *
- * Prioridad de resolución (mayor a menor):
- *  1. Variables de entorno del sistema operativo  →  ideal para Docker/servidores
- *  2. Archivo src/main/resources/config.properties →  ideal para desarrollo local
+ * Resolution priority (highest to lowest):
+ *  1. OS environment variables  — preferred for Docker / production servers
+ *  2. src/main/resources/config.properties — preferred for local development
  */
 public class BotConfig {
 
@@ -29,8 +29,8 @@ public class BotConfig {
     }
 
     /**
-     * Carga la configuración y valida que los valores obligatorios estén presentes.
-     * Lanza {@link IllegalStateException} con un mensaje descriptivo si falta algo.
+     * Loads configuration and validates that all required values are present.
+     * Throws {@link IllegalStateException} with a descriptive message if anything is missing.
      */
     public static BotConfig load() {
         Properties props = loadPropertiesFile();
@@ -42,7 +42,7 @@ public class BotConfig {
         validateToken(discordToken, "DISCORD_TOKEN");
         validateToken(riotApiKey,   "RIOT_API_KEY");
 
-        logger.info("Configuración cargada. Región por defecto: {}", defaultRegion);
+        logger.info("Configuration loaded. Default region: {}", defaultRegion);
         return new BotConfig(discordToken, riotApiKey, defaultRegion);
     }
 
@@ -55,15 +55,15 @@ public class BotConfig {
             if (is != null) {
                 props.load(is);
             } else {
-                logger.warn("No se encontró config.properties. Se usarán variables de entorno.");
+                logger.warn("config.properties not found. Falling back to environment variables.");
             }
         } catch (IOException e) {
-            logger.warn("Error leyendo config.properties: {}", e.getMessage());
+            logger.warn("Error reading config.properties: {}", e.getMessage());
         }
         return props;
     }
 
-    /** Busca primero en variables de entorno; si no, en el archivo de propiedades. */
+    /** Checks environment variables first, then falls back to the properties file. */
     private static String resolveProperty(String key, Properties props) {
         return resolveProperty(key, props, null);
     }
@@ -81,10 +81,10 @@ public class BotConfig {
     }
 
     private static void validateToken(String value, String name) {
-        if (value == null || value.isBlank() || value.startsWith("TU_")) {
+        if (value == null || value.isBlank() || value.startsWith("your_")) {
             throw new IllegalStateException(
-                "[CONFIG] Falta configurar '" + name + "'. " +
-                "Defínelo en config.properties o como variable de entorno."
+                "[CONFIG] Missing required property '" + name + "'. " +
+                "Set it in config.properties or as an environment variable."
             );
         }
     }

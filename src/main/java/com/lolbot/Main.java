@@ -13,48 +13,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Punto de entrada del LoL Stats Bot.
+ * Entry point for LoL Stats Bot.
  *
- * Responsabilidades de esta clase:
- *  1. Cargar la configuración (tokens y API keys desde config.properties o env vars).
- *  2. Construir la instancia de JDA con los Intents y Cachés óptimos.
- *  3. Registrar los listeners de eventos (ReadyListener, CommandManager).
- *  4. Esperar a que JDA esté listo (awaitReady) y registrar los Slash Commands.
+ * Responsibilities:
+ *  1. Load configuration (tokens and API keys from config.properties or env vars).
+ *  2. Build the JDA instance with minimal intents and cache flags.
+ *  3. Register event listeners (ReadyListener, CommandManager).
+ *  4. Wait for JDA to be ready, then register slash commands.
  *
- * ─────────────────────────────────────────────────────────────────────────────
- *  NOTA SOBRE LOS GATEWAY INTENTS:
- *  Los Intents declaran qué eventos quieres recibir de Discord. Hay intents
- *  "privilegiados" que requieren habilitación manual en el Developer Portal:
- *   - GUILD_MEMBERS      → lista de miembros (no la necesitamos)
- *   - MESSAGE_CONTENT    → contenido de mensajes (no la necesitamos; usamos slash commands)
- *   - GUILD_PRESENCES    → estado online/offline (no la necesitamos)
- *
- *  Para un bot de slash commands usamos createLight() que solo incluye los
- *  intents mínimos necesarios para el funcionamiento básico.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Gateway Intents note:
+ *  Privileged intents (GUILD_MEMBERS, MESSAGE_CONTENT, GUILD_PRESENCES) are not
+ *  needed for a slash-command-only bot and are therefore not requested.
+ *  createLight() covers the minimum set required for basic operation.
  */
 public class Main {
 
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        logger.info("Iniciando LoL Stats Bot...");
+        logger.info("Starting LoL Stats Bot...");
 
-        // Carga la configuración. Lanza IllegalStateException si falta DISCORD_TOKEN o RIOT_API_KEY.
         BotConfig config = BotConfig.load();
 
         try {
             JDA jda = JDABuilder
-                    // createLight incluye solo los intents básicos: GUILDS y GUILD_MESSAGES (sin contenido).
-                    // Es suficiente para bots que usan exclusivamente slash commands.
                     .createLight(config.getDiscordToken())
-
-                    // Aunque createLight ya minimiza los intents, declaramos explícitamente
-                    // que no necesitamos ninguno adicional para ser claros sobre el alcance del bot.
                     .enableIntents(GatewayIntent.GUILD_MESSAGES)
-
-                    // Deshabilitamos cachés internas de JDA que no usamos para reducir memoria.
-                    // Un bot de estadísticas no necesita cachear estados de voz, emojis, etc.
                     .disableCache(
                             CacheFlag.VOICE_STATE,
                             CacheFlag.EMOJI,
@@ -62,66 +46,55 @@ public class Main {
                             CacheFlag.SCHEDULED_EVENTS,
                             CacheFlag.MEMBER_OVERRIDES
                     )
-
-                    // Registramos los listeners ANTES de build() para no perder eventos
-                    // que puedan ocurrir durante la inicialización.
                     .addEventListeners(
-                            new ReadyListener(),       // loguea cuando el bot se conecta
-                            new CommandManager(config) // maneja el slash command /stats
+                            new ReadyListener(),
+                            new CommandManager(config)
                     )
                     .build();
 
-            // awaitReady() bloquea el hilo principal hasta que JDA haya terminado
-            // de conectarse al Gateway de Discord y cargar los datos iniciales.
-            // Solo después de esto podemos registrar comandos de forma segura.
             jda.awaitReady();
-
-            // Registramos los Slash Commands globales.
-            //
-            // DESARROLLO vs PRODUCCIÓN:
-            //  - Comandos de servidor (guild): instantáneos, útiles para testear.
-            //    Cambiar por: jda.getGuildById("TU_GUILD_ID").updateCommands()...
-            //  - Comandos globales: tardan hasta 1 hora en propagarse a todos los servidores.
-            //    Usar en producción.
             registerSlashCommands(jda);
 
         } catch (InterruptedException e) {
-            logger.error("El hilo principal fue interrumpido durante la inicialización de JDA.", e);
-            Thread.currentThread().interrupt(); // Buena práctica: restaurar el flag de interrupción
+            logger.error("Main thread interrupted during JDA initialization.", e);
+            Thread.currentThread().interrupt();
             System.exit(1);
         }
     }
 
     /**
-     * Registra todos los Slash Commands del bot en Discord.
-     * Se hace DESPUÉS de awaitReady() para garantizar que JDA esté autenticado.
+     * Registers all global slash commands with Discord.
+     * Must be called after awaitReady() to ensure JDA is authenticated.
+     *
+     * Global commands take up to 1 hour to propagate. For faster testing,
+     * replace jda.updateCommands() with jda.getGuildById("GUILD_ID").updateCommands().
      */
     private static void registerSlashCommands(JDA jda) {
         jda.updateCommands()
             .addCommands(
 
-                Commands.slash("stats", "Muestra el rango y estadísticas de un invocador de League of Legends")
-                    .addOption(OptionType.STRING, "invocador",
-                        "Riot ID completo del jugador (ej: Faker#KR1)", true)
+                Commands.slash("stats", "Shows the rank and stats of a League of Legends summoner")
+                    .addOption(OptionType.STRING, "summoner",
+                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
                     .addOption(OptionType.STRING, "region",
-                        "Servidor del jugador (ej: na1, euw1, kr, la1, br1). Por defecto: la1", false),
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
-                Commands.slash("matches", "Muestra el historial de las últimas 10 partidas de un jugador")
-                    .addOption(OptionType.STRING, "invocador",
-                        "Riot ID completo del jugador (ej: Faker#KR1)", true)
+                Commands.slash("matches", "Shows the last 10 matches for a player")
+                    .addOption(OptionType.STRING, "summoner",
+                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
                     .addOption(OptionType.STRING, "region",
-                        "Servidor del jugador (ej: na1, euw1, kr, la1, br1). Por defecto: la1", false),
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
-                Commands.slash("partidas", "Muestra el historial de las últimas 10 partidas de un jugador")
-                    .addOption(OptionType.STRING, "invocador",
-                        "Riot ID completo del jugador (ej: Faker#KR1)", true)
+                Commands.slash("partidas", "Shows the last 10 matches for a player")
+                    .addOption(OptionType.STRING, "summoner",
+                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
                     .addOption(OptionType.STRING, "region",
-                        "Servidor del jugador (ej: na1, euw1, kr, la1, br1). Por defecto: la1", false)
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false)
 
             )
             .queue(
-                success -> logger.info("Slash commands registrados: {} comando(s).", success.size()),
-                failure -> logger.error("No se pudieron registrar los slash commands: {}", failure.getMessage())
+                success -> logger.info("Slash commands registered: {} command(s).", success.size()),
+                failure -> logger.error("Failed to register slash commands: {}", failure.getMessage())
             );
     }
 }

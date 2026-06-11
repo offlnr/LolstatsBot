@@ -3,21 +3,21 @@ package com.lolbot.util;
 import java.util.Map;
 
 /**
- * Utilidades para resolver las regiones y clusters de la API de Riot Games.
+ * Utilities for resolving Riot Games API regions and clusters.
  *
- * La API tiene DOS niveles de enrutamiento:
+ * The API uses two routing levels:
  *
- *  1. PLATAFORMAS (regionales) — para Summoner-V4, League-V4, Champion-Mastery-V4
- *     Ejemplos: na1, br1, la1, la2, euw1, eun1, tr1, ru, kr, jp1, oc1
+ *  1. PLATFORMS (regional) — for Summoner-V4, League-V4, Champion-Mastery-V4
+ *     Examples: na1, br1, la1, la2, euw1, eun1, tr1, ru, kr, jp1, oc1
  *
- *  2. CLUSTERS (continentales) — para Account-V1, Match-V5
- *     Ejemplos: americas, europe, asia, sea
+ *  2. CLUSTERS (continental) — for Account-V1, Match-V5
+ *     Examples: americas, europe, asia, sea
  *
- * Siempre debes usar el host correcto para cada endpoint.
+ * Always use the correct host for each endpoint.
  */
 public final class RegionUtil {
 
-    // Mapa de plataforma → cluster para Account-V1 y Match-V5
+    // Maps platform -> continental cluster for Account-V1 and Match-V5
     private static final Map<String, String> PLATFORM_TO_CLUSTER = Map.ofEntries(
         Map.entry("na1",  "americas"),
         Map.entry("na",   "americas"),
@@ -44,7 +44,7 @@ public final class RegionUtil {
         Map.entry("vn2",  "sea")
     );
 
-    // Normaliza abreviaturas comunes al identificador oficial de plataforma
+    // Normalizes common aliases to their official platform identifier
     private static final Map<String, String> ALIAS_TO_PLATFORM = Map.of(
         "na",   "na1",
         "br",   "br1",
@@ -57,13 +57,13 @@ public final class RegionUtil {
         "oc",   "oc1"
     );
 
-    private RegionUtil() { /* clase de utilidad, no instanciar */ }
+    private RegionUtil() {}
 
     /**
-     * Devuelve el cluster continental para Account-V1 / Match-V5.
-     * Si la región no se reconoce, retorna "americas" como fallback seguro.
+     * Returns the continental cluster for Account-V1 / Match-V5.
+     * Falls back to "americas" if the region is unrecognized.
      *
-     * Ej: "na1" → "americas" | "euw1" → "europe" | "kr" → "asia"
+     * E.g. "na1" -> "americas" | "euw1" -> "europe" | "kr" -> "asia"
      */
     public static String getCluster(String region) {
         return PLATFORM_TO_CLUSTER.getOrDefault(
@@ -73,8 +73,8 @@ public final class RegionUtil {
     }
 
     /**
-     * Normaliza aliases comunes al ID oficial de plataforma.
-     * Ej: "na" → "na1" | "EUW" → "euw1" | "na1" → "na1" (sin cambios)
+     * Normalizes common aliases to the official platform ID.
+     * E.g. "na" -> "na1" | "EUW" -> "euw1" | "las" -> "la2"
      */
     public static String normalizePlatform(String region) {
         String normalized = region.toLowerCase().trim();
