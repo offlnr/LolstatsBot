@@ -1,0 +1,19 @@
+# ============================================================
+# CONFIGURACIÓN DEL BOT — LoL Stats Bot
+# ============================================================
+# Copia este archivo como "config.properties" y completa los valores.
+# NUNCA subas config.properties al repositorio.
+# ============================================================
+
+# Token del Bot de Discord
+# Obtenido en: https://discord.com/developers/applications → Bot → Token
+DISCORD_TOKEN=tu_discord_token_aqui
+
+# API Key de Riot Games
+# Obtenida en: https://developer.riotgames.com
+# La Development Key expira cada 24 horas.
+RIOT_API_KEY=RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# Región por defecto cuando el usuario no especifica una.
+# Opciones válidas: na1, br1, la1, la2, euw1, eun1, tr1, ru, kr, jp1, oc1
+DEFAULT_REGION=la1

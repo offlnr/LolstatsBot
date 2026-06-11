@@ -1,0 +1,15 @@
+# Configuración con tokens sensibles — NUNCA subir
+src/main/resources/config.properties
+
+# Maven
+target/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
