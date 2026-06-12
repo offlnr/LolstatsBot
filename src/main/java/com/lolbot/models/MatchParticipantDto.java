@@ -33,14 +33,26 @@ public class MatchParticipantDto {
     @JsonProperty("champLevel")
     private int champLevel;
 
-    public String  getPuuid()                  { return puuid;                               }
-    public String  getChampionName()           { return championName;                        }
-    public int     getKills()                  { return kills;                               }
-    public int     getDeaths()                 { return deaths;                              }
-    public int     getAssists()                { return assists;                             }
-    public boolean isWin()                     { return win;                                 }
-    public int     getChampLevel()             { return champLevel;                          }
-    public int     getTotalCS()                { return totalMinionsKilled + neutralMinionsKilled; }
+    @JsonProperty("visionWardsBoughtInGame")
+    private int visionWardsBoughtInGame;
+
+    @JsonProperty("visionScore")
+    private int visionScore;
+
+    @JsonProperty("totalDamageDealtToChampions")
+    private int totalDamageDealtToChampions;
+
+    public String  getPuuid()                        { return puuid;                               }
+    public String  getChampionName()                 { return championName;                        }
+    public int     getKills()                        { return kills;                               }
+    public int     getDeaths()                       { return deaths;                              }
+    public int     getAssists()                      { return assists;                             }
+    public boolean isWin()                           { return win;                                 }
+    public int     getChampLevel()                   { return champLevel;                          }
+    public int     getTotalCS()                      { return totalMinionsKilled + neutralMinionsKilled; }
+    public int     getVisionWardsBoughtInGame()      { return visionWardsBoughtInGame;             }
+    public int     getVisionScore()                  { return visionScore;                         }
+    public int     getTotalDamageDealtToChampions()  { return totalDamageDealtToChampions;         }
 
     public String getFormattedKda() {
         return kills + "/" + deaths + "/" + assists;

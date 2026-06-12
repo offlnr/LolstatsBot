@@ -85,9 +85,19 @@ public class Main {
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
-                Commands.slash("partidas", "Shows the last 10 matches for a player")
+                Commands.slash("live", "Check if a player is currently in a live game")
                     .addOption(OptionType.STRING, "summoner",
                         "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                    .addOption(OptionType.STRING, "region",
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+
+                Commands.slash("lastmatch", "Detailed breakdown of a player's most recent match")
+                    .addOption(OptionType.STRING, "summoner",
+                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                    .addOption(OptionType.STRING, "region",
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+
+                Commands.slash("clash", "Show upcoming Clash tournament schedule for a region")
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false)
 

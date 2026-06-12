@@ -2,7 +2,9 @@ package com.lolbot.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lolbot.models.AccountDto;
+import com.lolbot.models.ClashTournamentDto;
 import com.lolbot.models.LeagueEntryDto;
+import com.lolbot.models.LiveGameDto;
 import com.lolbot.models.MatchDto;
 import com.lolbot.models.SummonerDto;
 import com.lolbot.util.RegionUtil;
@@ -171,6 +173,61 @@ public class RiotApiService {
 
         logger.info("Match-V5 -> {} [cluster: {}]", matchId, cluster);
         return executeRequest(url, MatchDto.class);
+    }
+
+    // =========================================================================
+    // Spectator-V5: PUUID -> live game data
+    // =========================================================================
+
+    /**
+     * Queries Spectator-V5 to check if the player is currently in an active game.
+     *
+     * Endpoint: GET /lol/spectator/v5/active-games/by-summoner/{encryptedPUUID}
+     * Host: {platform}.api.riotgames.com
+     *
+     * Returns an empty Optional when the player is not in a game (HTTP 404).
+     * Any other HTTP error is propagated as a RiotApiException.
+     */
+    public java.util.Optional<LiveGameDto> getLiveGame(String puuid, String platform)
+            throws RiotApiException, IOException {
+
+        String url = String.format(
+            PLATFORM_BASE_URL + "/lol/spectator/v5/active-games/by-summoner/%s",
+            platform, puuid
+        );
+
+        logger.info("Spectator-V5 -> PUUID: {}... [platform: {}]", puuid.substring(0, 8), platform);
+        try {
+            return java.util.Optional.of(executeRequest(url, LiveGameDto.class));
+        } catch (RiotApiException e) {
+            if (e.getHttpCode() == 404) return java.util.Optional.empty(); // not in game — expected case
+            throw e;
+        }
+    }
+
+    // =========================================================================
+    // Clash-V1: upcoming tournaments for the platform
+    // =========================================================================
+
+    /**
+     * Queries Clash-V1 for all active and upcoming tournaments in the given platform.
+     *
+     * Endpoint: GET /lol/clash/v1/tournaments
+     * Host: {platform}.api.riotgames.com
+     *
+     * Returns an empty list when no tournaments are scheduled.
+     */
+    public List<ClashTournamentDto> getClashTournaments(String platform)
+            throws RiotApiException, IOException {
+
+        String url = String.format(
+            PLATFORM_BASE_URL + "/lol/clash/v1/tournaments",
+            platform
+        );
+
+        logger.info("Clash-V1 tournaments [platform: {}]", platform);
+        ClashTournamentDto[] tournaments = executeRequest(url, ClashTournamentDto[].class);
+        return Arrays.asList(tournaments);
     }
 
     // =========================================================================

@@ -2,7 +2,9 @@ package com.lolbot.commands;
 
 import com.lolbot.config.BotConfig;
 import com.lolbot.models.AccountDto;
+import com.lolbot.models.ClashTournamentDto;
 import com.lolbot.models.LeagueEntryDto;
+import com.lolbot.models.LiveGameDto;
 import com.lolbot.models.MatchDto;
 import com.lolbot.models.SummonerDto;
 import com.lolbot.services.RiotApiService;
@@ -57,24 +59,36 @@ public class CommandManager extends ListenerAdapter {
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         String commandName = event.getName();
-        if (!commandName.equals("stats") && !commandName.equals("matches") && !commandName.equals("partidas")) return;
+        boolean knownCommand = switch (commandName) {
+            case "stats", "matches", "live", "lastmatch", "clash" -> true;
+            default -> false;
+        };
+        if (!knownCommand) return;
 
         // Respond immediately to satisfy Discord's 3-second deadline
         event.deferReply().queue();
 
-        String riotIdInput = event.getOption("summoner").getAsString().trim();
         String regionInput = event.getOption("region") != null
                 ? event.getOption("region").getAsString()
                 : config.getDefaultRegion();
         String platform = RegionUtil.normalizePlatform(regionInput);
 
+        // /clash has no summoner parameter
+        if (commandName.equals("clash")) {
+            logger.info("/clash invoked by '{}' [platform: {}]", event.getUser().getName(), platform);
+            executor.submit(() -> processClashCommand(event, platform));
+            return;
+        }
+
+        String riotIdInput = event.getOption("summoner").getAsString().trim();
         logger.info("/{} invoked by '{}' -> summoner='{}', platform='{}'",
                 commandName, event.getUser().getName(), riotIdInput, platform);
 
-        if (commandName.equals("stats")) {
-            executor.submit(() -> processStatsCommand(event, riotIdInput, platform));
-        } else {
-            executor.submit(() -> processMatchesCommand(event, riotIdInput, platform));
+        switch (commandName) {
+            case "stats"     -> executor.submit(() -> processStatsCommand(event, riotIdInput, platform));
+            case "live"      -> executor.submit(() -> processLiveCommand(event, riotIdInput, platform));
+            case "lastmatch" -> executor.submit(() -> processLastMatchCommand(event, riotIdInput, platform));
+            default          -> executor.submit(() -> processMatchesCommand(event, riotIdInput, platform));
         }
     }
 
@@ -184,6 +198,147 @@ public class CommandManager extends ListenerAdapter {
                 "Could not reach Riot Games servers. Please try again in a moment.");
         } catch (Exception e) {
             logger.error("Unexpected error in /matches for '{}': {}", riotIdInput, e.getMessage(), e);
+            sendError(event, "Unexpected Error",
+                "An internal error occurred. If the problem persists, contact the bot administrator.");
+        }
+    }
+
+    // =========================================================================
+    // /live — active game check (Spectator-V5)
+    // =========================================================================
+
+    private void processLiveCommand(SlashCommandInteractionEvent event,
+                                    String riotIdInput,
+                                    String platform) {
+        try {
+            if (!riotIdInput.contains("#")) {
+                sendError(event, "Invalid format",
+                    "Riot ID must follow the format `Name#TAG`\n" +
+                    "Example: `/live summoner:Faker#KR1`");
+                return;
+            }
+
+            String[] parts    = riotIdInput.split("#", 2);
+            String   gameName = parts[0].trim();
+            String   tagLine  = parts[1].trim();
+
+            if (gameName.isEmpty() || tagLine.isEmpty()) {
+                sendError(event, "Invalid format", "Name and tag cannot be empty.");
+                return;
+            }
+
+            AccountDto account = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
+
+            java.util.Optional<LiveGameDto> liveGame =
+                    riotApiService.getLiveGame(account.getPuuid(), platform);
+
+            if (liveGame.isEmpty()) {
+                // Normal state — player is simply not in a game
+                event.getHook().editOriginalEmbeds(
+                    StatsEmbedBuilder.buildNotInGameEmbed(account)
+                ).queue();
+                logger.info("Player '{}' is not in an active game.", riotIdInput);
+                return;
+            }
+
+            event.getHook().editOriginalEmbeds(
+                StatsEmbedBuilder.buildLiveGameEmbed(account, liveGame.get(), account.getPuuid())
+            ).queue();
+            logger.info("Live game embed sent for '{}'", riotIdInput);
+
+        } catch (RiotApiException e) {
+            logger.warn("RiotApiException in /live for '{}': {} [HTTP {}]",
+                riotIdInput, e.getMessage(), e.getHttpCode());
+            sendError(event, "Riot API Error", e.getMessage());
+        } catch (java.io.IOException e) {
+            logger.error("IOException in /live for '{}': {}", riotIdInput, e.getMessage());
+            sendError(event, "Connection Error",
+                "Could not reach Riot Games servers. Please try again in a moment.");
+        } catch (Exception e) {
+            logger.error("Unexpected error in /live for '{}': {}", riotIdInput, e.getMessage(), e);
+            sendError(event, "Unexpected Error",
+                "An internal error occurred. If the problem persists, contact the bot administrator.");
+        }
+    }
+
+    // =========================================================================
+    // /lastmatch — detailed breakdown of the most recent match (Match-V5)
+    // =========================================================================
+
+    private void processLastMatchCommand(SlashCommandInteractionEvent event,
+                                         String riotIdInput,
+                                         String platform) {
+        try {
+            if (!riotIdInput.contains("#")) {
+                sendError(event, "Invalid format",
+                    "Riot ID must follow the format `Name#TAG`\n" +
+                    "Example: `/lastmatch summoner:Faker#KR1`");
+                return;
+            }
+
+            String[] parts    = riotIdInput.split("#", 2);
+            String   gameName = parts[0].trim();
+            String   tagLine  = parts[1].trim();
+
+            if (gameName.isEmpty() || tagLine.isEmpty()) {
+                sendError(event, "Invalid format", "Name and tag cannot be empty.");
+                return;
+            }
+
+            AccountDto account  = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
+            List<String> matchIds = riotApiService.getMatchIds(account.getPuuid(), platform, 1);
+
+            if (matchIds.isEmpty()) {
+                sendError(event, "No matches found",
+                    "No recent matches were found for **" + riotIdInput + "**.");
+                return;
+            }
+
+            MatchDto match = riotApiService.getMatch(matchIds.get(0), platform);
+
+            event.getHook().editOriginalEmbeds(
+                StatsEmbedBuilder.buildLastMatchEmbed(account, match, account.getPuuid())
+            ).queue();
+            logger.info("Last match embed sent for '{}'", riotIdInput);
+
+        } catch (RiotApiException e) {
+            logger.warn("RiotApiException in /lastmatch for '{}': {} [HTTP {}]",
+                riotIdInput, e.getMessage(), e.getHttpCode());
+            sendError(event, "Riot API Error", e.getMessage());
+        } catch (java.io.IOException e) {
+            logger.error("IOException in /lastmatch for '{}': {}", riotIdInput, e.getMessage());
+            sendError(event, "Connection Error",
+                "Could not reach Riot Games servers. Please try again in a moment.");
+        } catch (Exception e) {
+            logger.error("Unexpected error in /lastmatch for '{}': {}", riotIdInput, e.getMessage(), e);
+            sendError(event, "Unexpected Error",
+                "An internal error occurred. If the problem persists, contact the bot administrator.");
+        }
+    }
+
+    // =========================================================================
+    // /clash — upcoming tournament schedule (Clash-V1)
+    // =========================================================================
+
+    private void processClashCommand(SlashCommandInteractionEvent event, String platform) {
+        try {
+            List<ClashTournamentDto> tournaments = riotApiService.getClashTournaments(platform);
+
+            event.getHook().editOriginalEmbeds(
+                StatsEmbedBuilder.buildClashEmbed(tournaments, platform)
+            ).queue();
+            logger.info("Clash embed sent [platform: {}], {} tournament(s)", platform, tournaments.size());
+
+        } catch (RiotApiException e) {
+            logger.warn("RiotApiException in /clash [platform: {}]: {} [HTTP {}]",
+                platform, e.getMessage(), e.getHttpCode());
+            sendError(event, "Riot API Error", e.getMessage());
+        } catch (java.io.IOException e) {
+            logger.error("IOException in /clash [platform: {}]: {}", platform, e.getMessage());
+            sendError(event, "Connection Error",
+                "Could not reach Riot Games servers. Please try again in a moment.");
+        } catch (Exception e) {
+            logger.error("Unexpected error in /clash [platform: {}]: {}", platform, e.getMessage(), e);
             sendError(event, "Unexpected Error",
                 "An internal error occurred. If the problem persists, contact the bot administrator.");
         }
