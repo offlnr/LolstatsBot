@@ -28,10 +28,6 @@ public class BotConfig {
         this.defaultRegion = defaultRegion;
     }
 
-    /**
-     * Loads configuration and validates that all required values are present.
-     * Throws {@link IllegalStateException} with a descriptive message if anything is missing.
-     */
     public static BotConfig load() {
         Properties props = loadPropertiesFile();
 
@@ -63,20 +59,15 @@ public class BotConfig {
         return props;
     }
 
-    /** Checks environment variables first, then falls back to the properties file. */
     private static String resolveProperty(String key, Properties props) {
         return resolveProperty(key, props, null);
     }
 
     private static String resolveProperty(String key, Properties props, String defaultValue) {
         String envValue = System.getenv(key);
-        if (envValue != null && !envValue.isBlank()) {
-            return envValue.trim();
-        }
+        if (envValue != null && !envValue.isBlank()) return envValue.trim();
         String propValue = props.getProperty(key);
-        if (propValue != null && !propValue.isBlank()) {
-            return propValue.trim();
-        }
+        if (propValue != null && !propValue.isBlank()) return propValue.trim();
         return defaultValue;
     }
 

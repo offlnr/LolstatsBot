@@ -94,22 +94,20 @@ public class CommandManager extends ListenerAdapter {
             return;
         }
 
-        // --- Stat commands: resolve summoner from option OR linked account ---
+        // --- Stat commands: 'me' triggers linked-account lookup, anything else is a literal Riot ID ---
+        String raw = event.getOption("summoner").getAsString().trim();
+
         String riotIdInput;
         String platform;
 
-        if (event.getOption("summoner") != null) {
-            riotIdInput = event.getOption("summoner").getAsString().trim();
-            platform    = resolvePlatform(event);
-        } else {
+        if (raw.equalsIgnoreCase("me")) {
             UserLinkDto linked = userLinkService.getLink(event.getUser().getId());
             if (linked == null) {
                 event.getHook().editOriginalEmbeds(
                     StatsEmbedBuilder.buildErrorEmbed(
                         "No account linked",
                         "You don't have a Riot account linked to your Discord profile.\n" +
-                        "Use `/link summoner:YourName#TAG` to connect your account, " +
-                        "or pass your Riot ID directly as an argument."
+                        "Use `/link summoner:YourName#TAG` to connect your account first."
                     )
                 ).queue();
                 return;
@@ -118,10 +116,12 @@ public class CommandManager extends ListenerAdapter {
             platform    = linked.getRegion();
             logger.info("/{} invoked by '{}' using linked account '{}'  [{}]",
                     commandName, event.getUser().getName(), riotIdInput, platform);
+        } else {
+            riotIdInput = raw;
+            platform    = resolvePlatform(event);
+            logger.info("/{} invoked by '{}' -> summoner='{}', platform='{}'",
+                    commandName, event.getUser().getName(), riotIdInput, platform);
         }
-
-        logger.info("/{} invoked by '{}' -> summoner='{}', platform='{}'",
-                commandName, event.getUser().getName(), riotIdInput, platform);
 
         switch (commandName) {
             case "stats"     -> executor.submit(() -> processStatsCommand(event, riotIdInput, platform));

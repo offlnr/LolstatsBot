@@ -12,20 +12,6 @@ import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Entry point for LoL Stats Bot.
- *
- * Responsibilities:
- *  1. Load configuration (tokens and API keys from config.properties or env vars).
- *  2. Build the JDA instance with minimal intents and cache flags.
- *  3. Register event listeners (ReadyListener, CommandManager).
- *  4. Wait for JDA to be ready, then register slash commands.
- *
- * Gateway Intents note:
- *  Privileged intents (GUILD_MEMBERS, MESSAGE_CONTENT, GUILD_PRESENCES) are not
- *  needed for a slash-command-only bot and are therefore not requested.
- *  createLight() covers the minimum set required for basic operation.
- */
 public class Main {
 
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -62,50 +48,36 @@ public class Main {
         }
     }
 
-    /**
-     * Registers all global slash commands with Discord.
-     * Must be called after awaitReady() to ensure JDA is authenticated.
-     *
-     * Global commands take up to 1 hour to propagate. For faster testing,
-     * replace jda.updateCommands() with jda.getGuildById("GUILD_ID").updateCommands().
-     */
     private static void registerSlashCommands(JDA jda) {
+        // Summoner field description explains the 'me' shortcut so users discover it naturally
+        String summonerDesc = "Riot ID (e.g. Faker#KR1), or 'me' to use your linked account";
+        String regionDesc   = "Server (e.g. na1, euw1, kr, la2, br1). Default: la1";
+
         jda.updateCommands()
             .addCommands(
 
                 Commands.slash("stats", "Shows the rank and stats of a summoner")
-                    .addOption(OptionType.STRING, "summoner",
-                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
-                    .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "summoner", summonerDesc, true)
+                    .addOption(OptionType.STRING, "region",   regionDesc,   false),
 
                 Commands.slash("matches", "Shows the last 10 matches for a player")
-                    .addOption(OptionType.STRING, "summoner",
-                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
-                    .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "summoner", summonerDesc, true)
+                    .addOption(OptionType.STRING, "region",   regionDesc,   false),
 
                 Commands.slash("live", "Check if a player is currently in a live game")
-                    .addOption(OptionType.STRING, "summoner",
-                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
-                    .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "summoner", summonerDesc, true)
+                    .addOption(OptionType.STRING, "region",   regionDesc,   false),
 
                 Commands.slash("lastmatch", "Detailed breakdown of the most recent match")
-                    .addOption(OptionType.STRING, "summoner",
-                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
-                    .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "summoner", summonerDesc, true)
+                    .addOption(OptionType.STRING, "region",   regionDesc,   false),
 
                 Commands.slash("clash", "Show upcoming Clash tournament schedule for a region")
-                    .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "region", regionDesc, false),
 
                 Commands.slash("link", "Link your Riot account to your Discord profile")
-                    .addOption(OptionType.STRING, "summoner",
-                        "Your Riot ID (e.g. YourName#TAG)", true)
-                    .addOption(OptionType.STRING, "region",
-                        "Your server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+                    .addOption(OptionType.STRING, "summoner", "Your Riot ID (e.g. YourName#TAG)", true)
+                    .addOption(OptionType.STRING, "region",   regionDesc, false),
 
                 Commands.slash("unlink", "Unlink your Riot account from your Discord profile")
 
