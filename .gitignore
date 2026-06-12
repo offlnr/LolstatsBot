@@ -13,3 +13,6 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# User data — contains Discord/Riot account links, never commit
+data/

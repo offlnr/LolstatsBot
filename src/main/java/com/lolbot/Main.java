@@ -73,33 +73,41 @@ public class Main {
         jda.updateCommands()
             .addCommands(
 
-                Commands.slash("stats", "Shows the rank and stats of a League of Legends summoner")
+                Commands.slash("stats", "Shows the rank and stats of a summoner")
                     .addOption(OptionType.STRING, "summoner",
-                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
                 Commands.slash("matches", "Shows the last 10 matches for a player")
                     .addOption(OptionType.STRING, "summoner",
-                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
                 Commands.slash("live", "Check if a player is currently in a live game")
                     .addOption(OptionType.STRING, "summoner",
-                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
-                Commands.slash("lastmatch", "Detailed breakdown of a player's most recent match")
+                Commands.slash("lastmatch", "Detailed breakdown of the most recent match")
                     .addOption(OptionType.STRING, "summoner",
-                        "Full Riot ID of the player (e.g. Faker#KR1)", true)
+                        "Riot ID (e.g. Faker#KR1). Leave empty to use your linked account.", false)
                     .addOption(OptionType.STRING, "region",
                         "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
 
                 Commands.slash("clash", "Show upcoming Clash tournament schedule for a region")
                     .addOption(OptionType.STRING, "region",
-                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false)
+                        "Player's server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+
+                Commands.slash("link", "Link your Riot account to your Discord profile")
+                    .addOption(OptionType.STRING, "summoner",
+                        "Your Riot ID (e.g. YourName#TAG)", true)
+                    .addOption(OptionType.STRING, "region",
+                        "Your server (e.g. na1, euw1, kr, la2, br1). Default: la1", false),
+
+                Commands.slash("unlink", "Unlink your Riot account from your Discord profile")
 
             )
             .queue(

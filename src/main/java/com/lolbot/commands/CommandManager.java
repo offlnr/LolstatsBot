@@ -7,8 +7,10 @@ import com.lolbot.models.LeagueEntryDto;
 import com.lolbot.models.LiveGameDto;
 import com.lolbot.models.MatchDto;
 import com.lolbot.models.SummonerDto;
+import com.lolbot.models.UserLinkDto;
 import com.lolbot.services.RiotApiService;
 import com.lolbot.services.RiotApiService.RiotApiException;
+import com.lolbot.services.UserLinkService;
 import com.lolbot.util.RegionUtil;
 import com.lolbot.util.StatsEmbedBuilder;
 import net.dv8tion.jda.api.entities.MessageEmbed;
@@ -24,88 +26,131 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Central slash command handler for the bot.
- *
- * Extends ListenerAdapter to receive Discord events through JDA.
+ * Central slash command handler.
  *
  * Why deferReply() + ExecutorService:
- *   Discord requires an initial response within 3 seconds.
- *   Riot API calls can take 1-3 seconds each.
- *   deferReply() immediately sends a "thinking..." indicator,
- *   giving us up to 15 minutes to edit the response with real data.
+ *   Discord requires a response within 3 seconds. Riot API calls can take longer.
+ *   deferReply() sends a "thinking..." indicator immediately, giving up to 15 minutes
+ *   to deliver the actual response. All API work runs on virtual threads so JDA's
+ *   event thread is never blocked.
  *
- *   HTTP requests run on a separate thread to avoid blocking JDA's
- *   event thread, which is shared across all events from all servers.
+ * Summoner resolution order for stat commands (/stats, /matches, /live, /lastmatch):
+ *   1. If the user passed the `summoner` option explicitly, use it.
+ *   2. Otherwise, look up the Discord user's linked Riot account via UserLinkService.
+ *   3. If neither is available, respond with a prompt to use /link.
  */
 public class CommandManager extends ListenerAdapter {
 
     private static final Logger logger = LoggerFactory.getLogger(CommandManager.class);
 
-    private final RiotApiService riotApiService;
-    private final BotConfig      config;
+    private final RiotApiService  riotApiService;
+    private final UserLinkService userLinkService;
+    private final BotConfig       config;
 
-    // Virtual thread pool (Java 21) — optimal for I/O-bound tasks like HTTP requests.
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     public CommandManager(BotConfig config) {
-        this.config         = config;
-        this.riotApiService = new RiotApiService(config.getRiotApiKey());
+        this.config          = config;
+        this.riotApiService  = new RiotApiService(config.getRiotApiKey());
+        this.userLinkService = new UserLinkService("data");
     }
 
     // =========================================================================
-    // Main listener — receives all slash commands
+    // Main router
     // =========================================================================
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         String commandName = event.getName();
+
         boolean knownCommand = switch (commandName) {
-            case "stats", "matches", "live", "lastmatch", "clash" -> true;
+            case "stats", "matches", "live", "lastmatch", "clash", "link", "unlink" -> true;
             default -> false;
         };
         if (!knownCommand) return;
 
-        // Respond immediately to satisfy Discord's 3-second deadline
         event.deferReply().queue();
 
-        String regionInput = event.getOption("region") != null
-                ? event.getOption("region").getAsString()
-                : config.getDefaultRegion();
-        String platform = RegionUtil.normalizePlatform(regionInput);
-
-        // /clash has no summoner parameter
+        // --- Commands with no summoner parameter ---
         if (commandName.equals("clash")) {
+            String platform = resolvePlatform(event);
             logger.info("/clash invoked by '{}' [platform: {}]", event.getUser().getName(), platform);
             executor.submit(() -> processClashCommand(event, platform));
             return;
         }
 
-        String riotIdInput = event.getOption("summoner").getAsString().trim();
+        if (commandName.equals("unlink")) {
+            executor.submit(() -> processUnlinkCommand(event));
+            return;
+        }
+
+        // --- /link: summoner is required, supplied directly ---
+        if (commandName.equals("link")) {
+            String riotIdInput = event.getOption("summoner").getAsString().trim();
+            String platform    = resolvePlatform(event);
+            logger.info("/link invoked by '{}' -> summoner='{}', platform='{}'",
+                    event.getUser().getName(), riotIdInput, platform);
+            executor.submit(() -> processLinkCommand(event, riotIdInput, platform));
+            return;
+        }
+
+        // --- Stat commands: resolve summoner from option OR linked account ---
+        String riotIdInput;
+        String platform;
+
+        if (event.getOption("summoner") != null) {
+            riotIdInput = event.getOption("summoner").getAsString().trim();
+            platform    = resolvePlatform(event);
+        } else {
+            UserLinkDto linked = userLinkService.getLink(event.getUser().getId());
+            if (linked == null) {
+                event.getHook().editOriginalEmbeds(
+                    StatsEmbedBuilder.buildErrorEmbed(
+                        "No account linked",
+                        "You don't have a Riot account linked to your Discord profile.\n" +
+                        "Use `/link summoner:YourName#TAG` to connect your account, " +
+                        "or pass your Riot ID directly as an argument."
+                    )
+                ).queue();
+                return;
+            }
+            riotIdInput = linked.getRiotId();
+            platform    = linked.getRegion();
+            logger.info("/{} invoked by '{}' using linked account '{}'  [{}]",
+                    commandName, event.getUser().getName(), riotIdInput, platform);
+        }
+
         logger.info("/{} invoked by '{}' -> summoner='{}', platform='{}'",
                 commandName, event.getUser().getName(), riotIdInput, platform);
 
         switch (commandName) {
             case "stats"     -> executor.submit(() -> processStatsCommand(event, riotIdInput, platform));
+            case "matches"   -> executor.submit(() -> processMatchesCommand(event, riotIdInput, platform));
             case "live"      -> executor.submit(() -> processLiveCommand(event, riotIdInput, platform));
             case "lastmatch" -> executor.submit(() -> processLastMatchCommand(event, riotIdInput, platform));
-            default          -> executor.submit(() -> processMatchesCommand(event, riotIdInput, platform));
         }
     }
 
+    /** Reads the region option, falling back to the configured default. */
+    private String resolvePlatform(SlashCommandInteractionEvent event) {
+        String regionInput = event.getOption("region") != null
+                ? event.getOption("region").getAsString()
+                : config.getDefaultRegion();
+        return RegionUtil.normalizePlatform(regionInput);
+    }
+
     // =========================================================================
-    // /stats — rank and summoner stats
+    // /link
     // =========================================================================
 
-    private void processStatsCommand(SlashCommandInteractionEvent event,
+    private void processLinkCommand(SlashCommandInteractionEvent event,
                                      String riotIdInput,
                                      String platform) {
         try {
             if (!riotIdInput.contains("#")) {
-                sendError(event,
-                    "Invalid format",
+                sendError(event, "Invalid format",
                     "Riot ID must follow the format `Name#TAG`\n" +
-                    "Example: `/stats summoner:Faker#KR1`"
-                );
+                    "Example: `/link summoner:Faker#KR1`");
                 return;
             }
 
@@ -118,25 +163,97 @@ public class CommandManager extends ListenerAdapter {
                 return;
             }
 
+            // Verify the account actually exists before saving the link
             AccountDto account = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
-            SummonerDto summoner = riotApiService.getSummonerByPuuid(account.getPuuid(), platform);
-            List<LeagueEntryDto> entries = riotApiService.getLeagueEntries(account.getPuuid(), platform);
 
-            MessageEmbed statsEmbed = StatsEmbedBuilder.buildStatsEmbed(account, summoner, entries, platform);
-            event.getHook().editOriginalEmbeds(statsEmbed).queue();
+            userLinkService.link(event.getUser().getId(), riotIdInput, platform);
 
-            logger.info("Stats response sent for '{}'", riotIdInput);
+            event.getHook().editOriginalEmbeds(
+                StatsEmbedBuilder.buildLinkSuccessEmbed(account.getGameName(), account.getTagLine(), platform)
+            ).queue();
 
         } catch (RiotApiException e) {
-            logger.warn("RiotApiException for '{}': {} [HTTP {}]",
+            logger.warn("RiotApiException in /link for '{}': {} [HTTP {}]",
                 riotIdInput, e.getMessage(), e.getHttpCode());
             sendError(event, "Riot API Error", e.getMessage());
-
         } catch (IOException e) {
-            logger.error("IOException querying API for '{}': {}", riotIdInput, e.getMessage());
+            logger.error("IOException in /link for '{}': {}", riotIdInput, e.getMessage());
             sendError(event, "Connection Error",
                 "Could not reach Riot Games servers. Please try again in a moment.");
+        } catch (Exception e) {
+            logger.error("Unexpected error in /link for '{}': {}", riotIdInput, e.getMessage(), e);
+            sendError(event, "Unexpected Error",
+                "An internal error occurred. If the problem persists, contact the bot administrator.");
+        }
+    }
 
+    // =========================================================================
+    // /unlink
+    // =========================================================================
+
+    private void processUnlinkCommand(SlashCommandInteractionEvent event) {
+        UserLinkDto linked = userLinkService.getLink(event.getUser().getId());
+
+        if (linked == null) {
+            sendError(event, "No account linked",
+                "You don't have a Riot account linked to your Discord profile.");
+            return;
+        }
+
+        // Split stored riotId to display name and tag in the confirmation embed
+        String[] parts    = linked.getRiotId().split("#", 2);
+        String   gameName = parts[0];
+        String   tagLine  = parts.length > 1 ? parts[1] : "";
+
+        userLinkService.unlink(event.getUser().getId());
+
+        event.getHook().editOriginalEmbeds(
+            StatsEmbedBuilder.buildUnlinkSuccessEmbed(gameName, tagLine)
+        ).queue();
+    }
+
+    // =========================================================================
+    // /stats
+    // =========================================================================
+
+    private void processStatsCommand(SlashCommandInteractionEvent event,
+                                     String riotIdInput,
+                                     String platform) {
+        try {
+            if (!riotIdInput.contains("#")) {
+                sendError(event, "Invalid format",
+                    "Riot ID must follow the format `Name#TAG`\n" +
+                    "Example: `/stats summoner:Faker#KR1`");
+                return;
+            }
+
+            String[] parts    = riotIdInput.split("#", 2);
+            String   gameName = parts[0].trim();
+            String   tagLine  = parts[1].trim();
+
+            if (gameName.isEmpty() || tagLine.isEmpty()) {
+                sendError(event, "Invalid format", "Name and tag cannot be empty.");
+                return;
+            }
+
+            AccountDto           account  = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
+            SummonerDto          summoner = riotApiService.getSummonerByPuuid(account.getPuuid(), platform);
+            List<LeagueEntryDto> entries  = riotApiService.getLeagueEntries(account.getPuuid(), platform);
+
+            event.getHook().editOriginalEmbeds(
+                StatsEmbedBuilder.buildStatsEmbed(account, summoner, entries, platform)
+            ).queue();
+
+            logger.info("Stats sent for '{}'", riotIdInput);
+
+        } catch (RiotApiException e) {
+            logger.warn("RiotApiException in /stats for '{}': {} [HTTP {}]",
+                riotIdInput, e.getMessage(), e.getHttpCode());
+            sendError(event, "Riot API Error", e.getMessage());
+        } catch (IOException e) {
+            logger.error("IOException in /stats for '{}': {}", riotIdInput, e.getMessage());
+            sendError(event, "Connection Error",
+                "Could not reach Riot Games servers. Please try again in a moment.");
         } catch (Exception e) {
             logger.error("Unexpected error in /stats for '{}': {}", riotIdInput, e.getMessage(), e);
             sendError(event, "Unexpected Error",
@@ -145,7 +262,7 @@ public class CommandManager extends ListenerAdapter {
     }
 
     // =========================================================================
-    // /matches & /partidas — last 10 match history
+    // /matches
     // =========================================================================
 
     private void processMatchesCommand(SlashCommandInteractionEvent event,
@@ -168,8 +285,7 @@ public class CommandManager extends ListenerAdapter {
                 return;
             }
 
-            AccountDto account = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
-
+            AccountDto   account  = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
             List<String> matchIds = riotApiService.getMatchIds(account.getPuuid(), platform, 10);
 
             if (matchIds.isEmpty()) {
@@ -204,7 +320,7 @@ public class CommandManager extends ListenerAdapter {
     }
 
     // =========================================================================
-    // /live — active game check (Spectator-V5)
+    // /live
     // =========================================================================
 
     private void processLiveCommand(SlashCommandInteractionEvent event,
@@ -233,24 +349,23 @@ public class CommandManager extends ListenerAdapter {
                     riotApiService.getLiveGame(account.getPuuid(), platform);
 
             if (liveGame.isEmpty()) {
-                // Normal state — player is simply not in a game
                 event.getHook().editOriginalEmbeds(
                     StatsEmbedBuilder.buildNotInGameEmbed(account)
                 ).queue();
-                logger.info("Player '{}' is not in an active game.", riotIdInput);
                 return;
             }
 
             event.getHook().editOriginalEmbeds(
                 StatsEmbedBuilder.buildLiveGameEmbed(account, liveGame.get(), account.getPuuid())
             ).queue();
-            logger.info("Live game embed sent for '{}'", riotIdInput);
+
+            logger.info("Live game sent for '{}'", riotIdInput);
 
         } catch (RiotApiException e) {
             logger.warn("RiotApiException in /live for '{}': {} [HTTP {}]",
                 riotIdInput, e.getMessage(), e.getHttpCode());
             sendError(event, "Riot API Error", e.getMessage());
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             logger.error("IOException in /live for '{}': {}", riotIdInput, e.getMessage());
             sendError(event, "Connection Error",
                 "Could not reach Riot Games servers. Please try again in a moment.");
@@ -262,7 +377,7 @@ public class CommandManager extends ListenerAdapter {
     }
 
     // =========================================================================
-    // /lastmatch — detailed breakdown of the most recent match (Match-V5)
+    // /lastmatch
     // =========================================================================
 
     private void processLastMatchCommand(SlashCommandInteractionEvent event,
@@ -285,7 +400,7 @@ public class CommandManager extends ListenerAdapter {
                 return;
             }
 
-            AccountDto account  = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
+            AccountDto   account  = riotApiService.getAccountByRiotId(gameName, tagLine, platform);
             List<String> matchIds = riotApiService.getMatchIds(account.getPuuid(), platform, 1);
 
             if (matchIds.isEmpty()) {
@@ -299,13 +414,14 @@ public class CommandManager extends ListenerAdapter {
             event.getHook().editOriginalEmbeds(
                 StatsEmbedBuilder.buildLastMatchEmbed(account, match, account.getPuuid())
             ).queue();
-            logger.info("Last match embed sent for '{}'", riotIdInput);
+
+            logger.info("Last match sent for '{}'", riotIdInput);
 
         } catch (RiotApiException e) {
             logger.warn("RiotApiException in /lastmatch for '{}': {} [HTTP {}]",
                 riotIdInput, e.getMessage(), e.getHttpCode());
             sendError(event, "Riot API Error", e.getMessage());
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             logger.error("IOException in /lastmatch for '{}': {}", riotIdInput, e.getMessage());
             sendError(event, "Connection Error",
                 "Could not reach Riot Games servers. Please try again in a moment.");
@@ -317,7 +433,7 @@ public class CommandManager extends ListenerAdapter {
     }
 
     // =========================================================================
-    // /clash — upcoming tournament schedule (Clash-V1)
+    // /clash
     // =========================================================================
 
     private void processClashCommand(SlashCommandInteractionEvent event, String platform) {
@@ -327,22 +443,25 @@ public class CommandManager extends ListenerAdapter {
             event.getHook().editOriginalEmbeds(
                 StatsEmbedBuilder.buildClashEmbed(tournaments, platform)
             ).queue();
-            logger.info("Clash embed sent [platform: {}], {} tournament(s)", platform, tournaments.size());
+
+            logger.info("Clash sent [platform: {}], {} tournament(s)", platform, tournaments.size());
 
         } catch (RiotApiException e) {
-            logger.warn("RiotApiException in /clash [platform: {}]: {} [HTTP {}]",
+            logger.warn("RiotApiException in /clash [{}]: {} [HTTP {}]",
                 platform, e.getMessage(), e.getHttpCode());
             sendError(event, "Riot API Error", e.getMessage());
-        } catch (java.io.IOException e) {
-            logger.error("IOException in /clash [platform: {}]: {}", platform, e.getMessage());
+        } catch (IOException e) {
+            logger.error("IOException in /clash [{}]: {}", platform, e.getMessage());
             sendError(event, "Connection Error",
                 "Could not reach Riot Games servers. Please try again in a moment.");
         } catch (Exception e) {
-            logger.error("Unexpected error in /clash [platform: {}]: {}", platform, e.getMessage(), e);
+            logger.error("Unexpected error in /clash [{}]: {}", platform, e.getMessage(), e);
             sendError(event, "Unexpected Error",
                 "An internal error occurred. If the problem persists, contact the bot administrator.");
         }
     }
+
+    // =========================================================================
 
     private void sendError(SlashCommandInteractionEvent event, String title, String description) {
         event.getHook()

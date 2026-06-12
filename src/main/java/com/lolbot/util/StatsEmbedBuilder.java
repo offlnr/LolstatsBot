@@ -305,6 +305,31 @@ public final class StatsEmbedBuilder {
     }
 
     // =========================================================================
+    // /link  &  /unlink
+    // =========================================================================
+
+    public static MessageEmbed buildLinkSuccessEmbed(String gameName, String tagLine, String region) {
+        return new EmbedBuilder()
+                .setTitle("Account linked")
+                .setDescription("**" + gameName + "  #" + tagLine + "**  ·  " + region.toUpperCase()
+                        + "\nis now linked to your Discord profile.")
+                .setColor(new Color(0, 160, 85))
+                .setFooter("Use /unlink to remove this connection.", null)
+                .setTimestamp(Instant.now())
+                .build();
+    }
+
+    public static MessageEmbed buildUnlinkSuccessEmbed(String gameName, String tagLine) {
+        return new EmbedBuilder()
+                .setTitle("Account unlinked")
+                .setDescription("**" + gameName + "  #" + tagLine + "** has been removed from your Discord profile.")
+                .setColor(new Color(100, 100, 110))
+                .setFooter("Use /link to connect a new account.", null)
+                .setTimestamp(Instant.now())
+                .build();
+    }
+
+    // =========================================================================
     // Error embed
     // =========================================================================
 
