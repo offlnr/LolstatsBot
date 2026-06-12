@@ -2,7 +2,20 @@
 
 A Discord bot built with Java 21 and JDA 5 that lets you look up League of Legends player stats, match history, live games, and Clash schedules directly from your server using slash commands.
 
+---
+
 ## Commands
+
+### Account linking
+
+| Command | Description |
+|---|---|
+| `/link [summoner] [region]` | Link your Riot account to your Discord profile |
+| `/unlink` | Remove your linked Riot account |
+
+Once linked, all stat commands work without typing your Riot ID every time.
+
+### Stats
 
 | Command | Description |
 |---|---|
@@ -12,19 +25,25 @@ A Discord bot built with Java 21 and JDA 5 that lets you look up League of Legen
 | `/lastmatch [summoner] [region]` | Detailed breakdown of the most recent match |
 | `/clash [region]` | Upcoming Clash tournament schedule |
 
+> `summoner` is optional on all stat commands if you have a linked account. You can still pass it explicitly to look up any other player.
+
 **Riot ID format:** `Name#TAG` — for example `Faker#KR1`
 
 **Region values:** `na1`, `euw1`, `kr`, `la1`, `la2`, `br1`, `jp1`, `eun1`, `tr1`, `oc1`
 Default region is `la1` (configurable in `config.properties`).
+
+---
 
 ## Tech stack
 
 - **Java 21** — virtual threads for non-blocking API calls
 - **JDA 5** — Discord API wrapper
 - **OkHttp 4** — HTTP client for Riot API requests
-- **Jackson** — JSON deserialization
+- **Jackson** — JSON deserialization and user link persistence
 - **Logback** — structured logging
 - **Maven** — build and dependency management
+
+---
 
 ## Setup
 
@@ -61,7 +80,9 @@ java -jar target/lolstatsbot-1.0-SNAPSHOT.jar
 
 ### 5. Invite the bot
 
-In the Discord Developer Portal, enable the `applications.commands` scope when generating the invite URL. Slash commands are registered globally on startup (can take up to 1 hour to appear on all servers).
+In the Discord Developer Portal, enable the `applications.commands` scope when generating the invite URL. Slash commands are registered globally on startup and can take up to 1 hour to appear on all servers.
+
+---
 
 ## Project structure
 
@@ -71,9 +92,10 @@ src/main/java/com/lolbot/
 ├── config/
 │   └── BotConfig.java               # Loads tokens from config.properties or env vars
 ├── commands/
-│   └── CommandManager.java          # Slash command router and processors
+│   └── CommandManager.java          # Slash command router and all command processors
 ├── services/
-│   └── RiotApiService.java          # All Riot API calls (Account, Match, Spectator, Clash)
+│   ├── RiotApiService.java          # All Riot API calls (Account, Match, Spectator, Clash)
+│   └── UserLinkService.java         # Persists Discord user -> Riot account links
 ├── models/
 │   ├── AccountDto.java
 │   ├── SummonerDto.java
@@ -81,15 +103,22 @@ src/main/java/com/lolbot/
 │   ├── MatchDto.java
 │   ├── MatchParticipantDto.java
 │   ├── LiveGameDto.java
-│   └── ClashTournamentDto.java
+│   ├── ClashTournamentDto.java
+│   └── UserLinkDto.java
 └── util/
     ├── StatsEmbedBuilder.java        # Builds all Discord embeds
-    ├── ChampionCache.java            # DDragon champion ID → name resolver
+    ├── ChampionCache.java            # DDragon champion ID -> name resolver
     └── RegionUtil.java               # Platform / cluster routing helpers
+
+data/
+└── user-links.json                  # Persistent Discord -> Riot account link table
 ```
+
+---
 
 ## Notes
 
 - Development API keys from Riot expire every 24 hours. Use a production key for long-term deployments.
 - Champion names in `/live` are resolved from Riot's Data Dragon CDN and cached in memory for the bot's lifetime.
+- User account links are stored in `data/user-links.json` next to the JAR and persist across restarts.
 - Slash commands are registered globally. For faster testing during development, switch to guild-scoped commands in `Main.java`.
